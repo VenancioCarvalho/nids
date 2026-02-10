@@ -2,7 +2,7 @@
 namespace nids.Sentinela.Engine;
 using System.Threading.Channels;
 using System.Net;
-using Sentinela.Core;
+using nids.Sentinela.Core;
 using SharpPcap;
 
 
