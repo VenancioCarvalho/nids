@@ -1,73 +1,86 @@
 
 namespace nids.Sentinela.Engine;
+using System.Threading.Channels;
+using System.Net;
+using Sentinela.Core;
 using SharpPcap;
-public class Analizador{
 
-    public DateTime? StartTimestamp = null;
-    public DateTime LastPacketTimestamp;
-   
-    public readonly struct LogEntry
-{   
-    public DateTime Timestamp { get; }
-    public string SourceAddress { get; }
-    public string DestinationAddress { get; }
-    public string SourcePort { get; }
-    public string DestinationPort { get; }
-    public bool Synchronize { get; }
-    public bool Acknowledgment { get; }
-    public bool Finished { get; }
-    public bool Reset { get; }
 
-    public LogEntry(
-        DateTime timestamp, 
-        string sourceAddress, 
-        string destinationAddress, 
-        string sourcePort, 
-        string destinationPort, 
-        bool synchronize, 
-        bool acknowledgment, 
-        bool finished, 
-        bool reset)
+public class PacketCaptureService{
+
+  
+    private readonly ChannelWriter<LogEntry> writer;
+
+    public PacketCaptureService(ChannelWriter<LogEntry> channel)
     {
-        Timestamp = timestamp;
-        SourceAddress = sourceAddress;
-        DestinationAddress = destinationAddress;
-        SourcePort = sourcePort;
-        DestinationPort = destinationPort;
-        Synchronize = synchronize;
-        Acknowledgment = acknowledgment;
-        Finished = finished;
-        Reset = reset;
+        writer = channel;
     }
-}
-
-
-    public void OnPacketArrival(object sender, PacketCapture e)
-    {
-        var rawPacket = e.GetPacket();
-        DateTime ts = rawPacket.Timeval.Date;
-
-        // Atualiza métricas de tempo
-        if (StartTimestamp == null) StartTimestamp = ts;
-        LastPacketTimestamp = ts;
-
-        var packet = PacketDotNet.Packet.ParsePacket(rawPacket.LinkLayerType, rawPacket.Data);
-        // Tenta extrair a camada IP (IPv4 ou IPv6)
-        var ipPacket = packet.Extract<PacketDotNet.IPPacket>();
-
-        if (ipPacket != null){
+    
+    public void OnPacketArrival(object sender, PacketCapture e){
         
-            Console.WriteLine($"TS: {ts:HH:mm:ss.fff}");
-            Console.WriteLine($"Origem: {ipPacket.SourceAddress} -> Destino: {ipPacket.DestinationAddress}");
-            
-            // Tenta extrair a camada de Transporte (TCP ou UDP)
-            var tcpPacket = packet.Extract<PacketDotNet.TcpPacket>();
-            //tamanho do payload
-            
-            if (tcpPacket != null){
-                Console.WriteLine($"Porta TCP: {tcpPacket.SourcePort} -> {tcpPacket.DestinationPort}");
-                Console.WriteLine($"Flags: SYN: {tcpPacket.Synchronize}, ACK: {tcpPacket.Acknowledgment}, FIN: {tcpPacket.Finished}, RST: {tcpPacket.Reset}");
-            }
+        ushort srcPort = 0;
+        ushort dstPort = 0;
+        bool syn = false, ack = false, fin = false, rst = false;
+
+        var rawPacket = e.GetPacket(); // Captura o pacote bruto
+        var packet = PacketDotNet.Packet.ParsePacket(rawPacket.LinkLayerType, rawPacket.Data);
+        
+        // Tenta extrair informações do protocolo IP(Camada 3)
+        var ipPacket = packet.Extract<PacketDotNet.IPPacket>();
+        if (ipPacket == null) return; 
+        uint srcIp = IpToUint(ipPacket.SourceAddress); // Converte o ip para um inteiro de 32 bits.
+        uint dstIp = IpToUint(ipPacket.DestinationAddress);
+        
+        // Tenta extrair informações dos protocolos TCP/UDP (camada 4)
+        var tcpPacket = packet.Extract<PacketDotNet.TcpPacket>();
+        var udpPacket = packet.Extract<PacketDotNet.UdpPacket>();
+
+        // Lógica para pegar portas e flags dependendo do protocolo
+        if (tcpPacket != null)
+        {
+            srcPort = tcpPacket.SourcePort;
+            dstPort = tcpPacket.DestinationPort;
+            syn = tcpPacket.Synchronize;
+            ack = tcpPacket.Acknowledgment;
+            fin = tcpPacket.Finished;
+            rst = tcpPacket.Reset;
         }
+        else if (udpPacket != null)
+        {
+            srcPort = udpPacket.SourcePort;
+            dstPort = udpPacket.DestinationPort;
+        }
+
+        // 3. Criação do Struct (Na Stack - Rápido)
+        var logEntry = new LogEntry
+        {
+            TimestampTicks = e.Header.Timeval.Date.Ticks, // Usamos Ticks (long)
+            SourceIp = srcIp,
+            DestIp = dstIp,
+            SourcePort = srcPort,
+            DestPort = dstPort,
+            Synchronize = syn,
+            Acknowledgment = ack,
+            Finished = fin,
+            Reset = rst,
+            OriginalLength = rawPacket.Data.Length
+        };
+        
+        // Se a fila estiver cheia, ele retorna false e descarta o pacote.
+        writer.TryWrite(logEntry);
     }
-}
+    
+
+    private static uint IpToUint(IPAddress ipAddress){
+        byte[] bytes = ipAddress.GetAddressBytes(); 
+        // Inverte bytes se a arquitetura do processador for Little Endian (padrão Intel/AMD)
+        // para manter a ordem matemática correta do IP
+        if (BitConverter.IsLittleEndian)
+        {
+            Array.Reverse(bytes);
+        }
+        return BitConverter.ToUInt32(bytes, 0);
+    }
+
+
+}// fim classe
