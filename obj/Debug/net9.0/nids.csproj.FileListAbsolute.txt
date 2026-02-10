@@ -16,3 +16,4 @@ C:\Users\Venancio Carvalho\Documents\Projetos\nids\obj\Debug\net9.0\refint\nids.
 C:\Users\Venancio Carvalho\Documents\Projetos\nids\obj\Debug\net9.0\nids.pdb
 C:\Users\Venancio Carvalho\Documents\Projetos\nids\obj\Debug\net9.0\nids.genruntimeconfig.cache
 C:\Users\Venancio Carvalho\Documents\Projetos\nids\obj\Debug\net9.0\ref\nids.dll
+C:\Users\Venancio Carvalho\Documents\Projetos\nids\obj\Debug\net9.0\nids.sourcelink.json
