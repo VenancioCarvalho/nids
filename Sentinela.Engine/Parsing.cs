@@ -17,7 +17,7 @@ public class PacketCaptureService{
     }
     
     public void OnPacketArrival(object sender, PacketCapture e){
-        
+        uint protocol = 0;
         ushort srcPort = 0;
         ushort dstPort = 0;
         bool syn = false, ack = false, fin = false, rst = false;
@@ -37,7 +37,8 @@ public class PacketCaptureService{
 
         // Lógica para pegar portas e flags dependendo do protocolo
         if (tcpPacket != null)
-        {
+        {   
+            protocol = 6;
             srcPort = tcpPacket.SourcePort;
             dstPort = tcpPacket.DestinationPort;
             syn = tcpPacket.Synchronize;
@@ -46,7 +47,8 @@ public class PacketCaptureService{
             rst = tcpPacket.Reset;
         }
         else if (udpPacket != null)
-        {
+        {   
+            protocol = 17;
             srcPort = udpPacket.SourcePort;
             dstPort = udpPacket.DestinationPort;
         }
@@ -63,7 +65,8 @@ public class PacketCaptureService{
             Acknowledgment = ack,
             Finished = fin,
             Reset = rst,
-            OriginalLength = rawPacket.Data.Length
+            OriginalLength = rawPacket.Data.Length,
+            Protocol= protocol
         };
         
         // Se a fila estiver cheia, ele retorna false e descarta o pacote.
