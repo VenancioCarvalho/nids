@@ -4,6 +4,8 @@ using System.Net;
 public readonly record struct LogEntry
     {
         public long TimestampTicks { get; init; } // Usar Ticks é mais leve que o objeto DateTime
+
+        public uint Protocol {get; init;}
         
         // IPs como inteiros 
         public uint SourceIp { get; init; }
