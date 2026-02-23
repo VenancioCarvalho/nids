@@ -5,136 +5,140 @@ namespace nids.Sentinela.Engine;
 public class AnalysisService
 {
     private readonly ChannelReader<LogEntry> _reader;
-        
-        // A Tabela de Fluxos em Memória
-        // Chave: String (SourceIP:Port -> DestIP:Port)
-        // Valor: O Objeto NetworkFlow
-        private readonly Dictionary<string, NetworkFlow> _activeFlows = new();
-
-        // Constantes de controle
-        private const int FLOW_TIMEOUT_SECONDS = 5; // Se ficar 60s sem pacote, fecha o fluxo
-        private DateTime _lastCleanupTime = DateTime.MinValue;
-
-        public AnalysisService(ChannelReader<LogEntry> reader)
-        {
-            _reader = reader;
-        }
-
-        public async Task StartAnalysisLoopAsync(CancellationToken ct)
-        { 
-            Console.WriteLine("[AnalysisService] Motor de Fluxos Iniciado.");
-
-            try
-            {
-                while (await _reader.WaitToReadAsync(ct))
-                {
-                    while (_reader.TryRead(out LogEntry entry))
-                    {
-                        ProcessPacket(entry);
-
-                        // A cada X pacotes ou tempo, rodamos a limpeza para economizar RAM
-                        // Aqui faremos uma verificação simples baseada no tempo do pacote atual
-                        if (new DateTime(entry.TimestampTicks) > _lastCleanupTime.AddSeconds(5))
-                        {
-                            CleanupExpiredFlows(new DateTime(entry.TimestampTicks));
-                        }
-                    }
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                // Graceful shutdown
-            }
-        }
-
-        private void ProcessPacket(LogEntry entry)
-        {
-            // 1. Gerar a Chave do Fluxo (Unidirecional)
-            // Usamos string para facilitar leitura agora, mas em prod usamos HashCode
-            string key = GenerateFlowKey(entry);
-
-            // 2. Verificar se o fluxo já existe
-            if (!_activeFlows.TryGetValue(key, out var flow))
-            {
-                // Se não existe, cria um novo
-                flow = new NetworkFlow
-                {
-                    FlowKey = key,
-                    FirstSeen = new DateTime(entry.TimestampTicks),
-                    LastSeen = new DateTime(entry.TimestampTicks),
-                    PacketCount = 0,
-                    TotalBytes = 0
-                };
-                _activeFlows.Add(key, flow);
-            }
-
-            // 3. Atualizar as estatísticas do fluxo
-            flow.Update(entry);
-        }
-
-        private string GenerateFlowKey(LogEntry entry)
-        {
-            // Formato: SrcIP:SrcPort -> DstIP:DstPort (Proto)
-            // Nota: Para NIDS real, IP deve ser convertido para string legível apenas na hora do LOG.
-            // Aqui simplificamos para você visualizar.
-            return $"{IntToIpString(entry.SourceIp)}:{entry.SourcePort}->{IntToIpString(entry.DestIp)}:{entry.DestPort}({entry.Protocol})";
-        }
-
-        private void CleanupExpiredFlows(DateTime currentTime)
-        {
-            // Encontra chaves de fluxos inativos
-            var expiredKeys = new List<string>();
-            
-            foreach (var kvp in _activeFlows)
-            {
-                var flow = kvp.Value;
-                if ((currentTime - flow.LastSeen).TotalSeconds > FLOW_TIMEOUT_SECONDS)
-                {
-                    expiredKeys.Add(kvp.Key);
-                }
-            }
-
-            // Remove e Exporta (Aqui entraria o ML futuramente)
-            foreach (var key in expiredKeys)
-            {
-                var flow = _activeFlows[key];
-                
-                // MOMENTO DE DECISÃO: O fluxo acabou.
-                // 1. Imprimir um resumo?
-                // 2. Salvar num CSV para treinar IA?
-                // 3. Mandar para o modelo prever se foi ataque?
-                
-                // Por enquanto, vamos imprimir fluxos "gordos" (com mais de 10 pacotes)
-                if (flow.PacketCount > 10)
-                {
-                    Console.WriteLine($"[FLUXO ENCERRADO] {flow.FlowKey} | Pkts: {flow.PacketCount} | Bytes: {flow.TotalBytes} | SYN/ACK: {flow.SynCount}/{flow.AckCount}");
-                }
-
-                _activeFlows.Remove(key);
-            }
-            
-            _lastCleanupTime = currentTime;
-        }
-
-        // Método auxiliar apenas para visualização (Log)
-        private string IntToIpString(long ipInt)
-        {
-            try 
-            {
-                // Converte o long/uint de volta para bytes
-                byte[] bytes = BitConverter.GetBytes((uint)ipInt);
-                
-                // Se sua máquina for Little Endian (Intel/AMD padrão), inverte para ler certo
-                if (BitConverter.IsLittleEndian)
-                {
-                    Array.Reverse(bytes);
-                }
-                return new System.Net.IPAddress(bytes).ToString();
-            }
-            catch
-            {
-                return "0.0.0.0";
-            }
-        }
     
+    // As 3 Tabelas Hash (Dicionários) para os níveis hierárquicos do Kitsune
+    private readonly Dictionary<HostKey, FeatureTracker> _hostTable = new();
+    private readonly Dictionary<ChannelKey, FeatureTracker> _channelTable = new();
+    private readonly Dictionary<SocketKey, FeatureTracker> _socketTable = new();
+
+
+    // Constantes de controle
+    private readonly double[] _lambdas = { 5, 3, 1, 0.1, 0.01 };
+
+    public AnalysisService(ChannelReader<LogEntry> reader)
+    {
+        _reader = reader;
+    }
+
+    public async Task StartAnalysisLoopAsync(CancellationToken ct)
+    { 
+        Console.WriteLine("[AnalysisService] Motor de Fluxos Iniciado.");
+
+        try
+        {
+            while (await _reader.WaitToReadAsync(ct))
+            {
+                while (_reader.TryRead(out LogEntry entry))
+                {
+                    ProcessPacket(entry);
+
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            Console.WriteLine("[AnalysisService] Processamento cancelado pelo usuário.");
+        }
+        catch (Exception ex)
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"[CRÍTICO] Ocorreu um erro ao processar o pacote: {ex.Message}");
+            Console.WriteLine(ex.StackTrace);
+            Console.ResetColor();
+        }
+    }
+
+    private void ProcessPacket(LogEntry entry)
+    {
+
+        long currentTimeMs = entry.TimestampTicks / TimeSpan.TicksPerMillisecond;
+        double packetSize = entry.OriginalLength;
+
+        // 1. Geração Imediata das 3 Chaves (Zero Alocação de Memória Heap!)
+        var hostKey = new HostKey(entry.SourceIp);
+        var channelKey = new ChannelKey(entry.SourceIp, entry.DestIp);
+        var socketKey = new SocketKey(
+            entry.SourceIp, 
+            entry.SourcePort, 
+            entry.DestIp, 
+            entry.DestPort, 
+            entry.Protocol
+        );
+
+        var hostContext = AtualizarContexto(_hostTable, hostKey, currentTimeMs, packetSize);
+        var channelContext = AtualizarContexto(_channelTable, channelKey, currentTimeMs, packetSize);
+        var socketContext = AtualizarContexto(_socketTable, socketKey, currentTimeMs, packetSize);
+
+    }
+
+    private  FeatureTracker AtualizarContexto<TKey>(
+    Dictionary<TKey, FeatureTracker> tabela, 
+    TKey chave, 
+    long currentTimeMs, 
+    double packetSize) where TKey : struct
+    {
+        // Se a chave ainda não existe na tabela, criamos a gaveta nova
+        if (!tabela.TryGetValue(chave, out var contexto))
+        {
+            contexto = new FeatureTracker(_lambdas, currentTimeMs);
+            tabela.Add(chave, contexto);
+        }
+
+        // O coração do sistema: Aplica o decaimento exponencial e injeta o novo pacote
+        contexto.ExtractUpdate(currentTimeMs, packetSize);
+
+        // Devolvemos o contexto já com os Trios (W, LS, SS) atualizados
+        return contexto;
+    }
+
+
+    public void ImprimirEstadoDasTabelas()
+    {
+        Console.WriteLine("\n=======================================================");
+        Console.WriteLine("    INSPEÇÃO DE MEMÓRIA DAS TABELAS HASH (KITSUNE)     ");
+        Console.WriteLine("=======================================================");
+        Console.WriteLine($"Total de Hosts: {_hostTable.Count}");
+        Console.WriteLine($"Total de Canais: {_channelTable.Count}");
+        Console.WriteLine($"Total de Sockets: {_socketTable.Count}");
+        Console.WriteLine("-------------------------------------------------------\n");
+
+        // Vamos imprimir apenas os 5 primeiros Canais para não inundar o console
+        int limiteConsole = 5;
+        int contador = 0;
+
+        Console.WriteLine("--- AMOSTRA DA TABELA DE CANAIS (A -> B) ---");
+        foreach (var kvp in _channelTable)
+        {
+            if (contador >= limiteConsole) break;
+
+            var chave = kvp.Key;
+            var contexto = kvp.Value;
+
+            // Convertendo IP de Int para String só para visualização
+            string ipOrigem = new System.Net.IPAddress(BitConverter.GetBytes(chave.SourceIp).Reverse().ToArray()).ToString();
+            string ipDestino = new System.Net.IPAddress(BitConverter.GetBytes(chave.DestIp).Reverse().ToArray()).ToString();
+
+            Console.WriteLine($"\n[Canal] {ipOrigem} -> {ipDestino}");
+            Console.WriteLine($"Último Pacote Visto (ms): {contexto.LastSeenMilliseconds}");
+
+            // Vamos olhar o que está guardado na 1ª Janela de Tempo (ex: Lambda 0)
+            var trioTamanho = contexto.SizeStats[0];
+            
+            Console.WriteLine("   Váriaveis de Estado Armazenadas na RAM:");
+            Console.WriteLine($"     -> Peso (w):  {trioTamanho.W:F4}");
+            Console.WriteLine($"     -> Soma (LS): {trioTamanho.LS:F4}");
+            Console.WriteLine($"     -> Quad (SS): {trioTamanho.SS:F4}");
+            
+            Console.WriteLine("   Estatísticas Calculadas Sob Demanda:");
+            Console.WriteLine($"     -> Média:     {trioTamanho.Mean:F2} bytes");
+            Console.WriteLine($"     -> Variância: {trioTamanho.Variance:F2}");
+
+            contador++;
+        }
+        
+        Console.WriteLine("\n=======================================================");
+    }
+
 }
+       
+

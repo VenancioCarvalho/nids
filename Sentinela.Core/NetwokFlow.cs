@@ -17,23 +17,12 @@ public class NetworkFlow{
         public long PacketCount { get; set; }
         public long TotalBytes { get; set; }
 
-        // --- Features de Comportamento 
-        public int SynCount { get; set; }
-        public int AckCount { get; set; }
-        public int FinCount { get; set; }
-        public int RstCount { get; set; } // RST alto indica portas fechadas 
-
         // Método para atualizar o fluxo com um novo pacote
         public void Update(LogEntry packet)
         {
             LastSeen = new DateTime(packet.TimestampTicks);
             PacketCount++;
             TotalBytes += packet.OriginalLength;
-
-            if (packet.Synchronize) SynCount++;
-            if (packet.Acknowledgment) AckCount++;
-            if (packet.Finished) FinCount++;
-            if (packet.Reset) RstCount++;
         }
 }
 

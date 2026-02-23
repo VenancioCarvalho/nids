@@ -8,7 +8,6 @@ using SharpPcap;
 
 public class PacketCaptureService{
 
-  
     private readonly ChannelWriter<LogEntry> writer;
 
     public PacketCaptureService(ChannelWriter<LogEntry> channel)
@@ -20,7 +19,6 @@ public class PacketCaptureService{
         uint protocol = 0;
         ushort srcPort = 0;
         ushort dstPort = 0;
-        bool syn = false, ack = false, fin = false, rst = false;
 
         var rawPacket = e.GetPacket(); // Captura o pacote bruto
         var packet = PacketDotNet.Packet.ParsePacket(rawPacket.LinkLayerType, rawPacket.Data);
@@ -41,10 +39,6 @@ public class PacketCaptureService{
             protocol = 6;
             srcPort = tcpPacket.SourcePort;
             dstPort = tcpPacket.DestinationPort;
-            syn = tcpPacket.Synchronize;
-            ack = tcpPacket.Acknowledgment;
-            fin = tcpPacket.Finished;
-            rst = tcpPacket.Reset;
         }
         else if (udpPacket != null)
         {   
@@ -61,10 +55,6 @@ public class PacketCaptureService{
             DestIp = dstIp,
             SourcePort = srcPort,
             DestPort = dstPort,
-            Synchronize = syn,
-            Acknowledgment = ack,
-            Finished = fin,
-            Reset = rst,
             OriginalLength = rawPacket.Data.Length,
             Protocol= protocol
         };

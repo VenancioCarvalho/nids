@@ -3,24 +3,17 @@ using System.Net;
 
 public readonly record struct LogEntry
     {
-        public long TimestampTicks { get; init; } // Usar Ticks é mais leve que o objeto DateTime
-
-        public uint Protocol {get; init;}
+        // 1. O Relógio (Obrigatório para o Decaimento)
+        public long TimestampTicks { get; init; } 
         
-        // IPs como inteiros 
+        // 2. Identificação (Obrigatório para gerar as Chaves Hash)
         public uint SourceIp { get; init; }
         public uint DestIp { get; init; }
-        
-        // Portas como inteiros curtos 
         public ushort SourcePort { get; init; }
         public ushort DestPort { get; init; }
+        public uint Protocol { get; init; } // byte é suficiente (ex: 6 para TCP, 17 para UDP)
         
-        // Flags
-        public bool Synchronize { get; init; }
-        public bool Acknowledgment { get; init; }
-        public bool Finished { get; init; }
-        public bool Reset { get; init; }
-        
+        // 3. A Característica Física (Obrigatório para as Médias/Variâncias)
         public int OriginalLength { get; init; }
 
         // Só usamos isso na hora de exibir, não é usado na fase de processamento.
