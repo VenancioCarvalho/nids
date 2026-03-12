@@ -1,4 +1,3 @@
-
 namespace nids.Sentinela.Engine;
 using System.Threading.Channels;
 using System.Net;
@@ -74,6 +73,5 @@ public class PacketCaptureService{
         }
         return BitConverter.ToUInt32(bytes, 0);
     }
-
 
 }// fim classe

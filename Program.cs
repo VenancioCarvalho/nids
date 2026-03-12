@@ -4,7 +4,8 @@ using System.Threading.Channels;
 using nids.Sentinela.Core;
 using nids.Sentinela.Engine;
 
-
+//\Device\NPF_{EF3FDC02-A092-4E0C-A436-EA19432E74E0}
+//\Device\NPF_{646F5B85-B24A-45F2-B29B-51E6B68B53F0}
 //Nome da placa de rede
 string nomeDaMinhaInterface = @"\Device\NPF_{646F5B85-B24A-45F2-B29B-51E6B68B53F0}";
 
@@ -32,7 +33,6 @@ ICaptureDevice device = devices.First(d => d.Name == nomeDaMinhaInterface);
 device.OnPacketArrival += captureService.OnPacketArrival;
 
 // Iniciando a captura
-
 device.Open(DeviceModes.Promiscuous, 1000);
 Console.WriteLine($"\n-- SENTINELA INICIADO na interface: {nomeDaMinhaInterface} --");
 Console.WriteLine("Pressione [ENTER] para parar.\n");
